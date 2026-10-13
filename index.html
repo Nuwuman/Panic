@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PanicBench · Diagnóstico de panic logs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E7ECEF; --panel:#F7F9FA; --ink:#15232B; --muted:#56676F; --line:#C5D0D5;
+  --mat:#2E5566; --amber:#C98A00; --fault:#B3261E; --ok:#2E7D4F; --tag:#FFF6DC; --tagline:#E4CF94;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#13202A; --panel:#1B2B36; --ink:#E4ECEF; --muted:#93A6AE; --line:#2D4250;
+    --mat:#7FB3C6; --amber:#F2B632; --fault:#FF7A6E; --ok:#6FCB94; --tag:#2B2716; --tagline:#5E5226;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#13202A; --panel:#1B2B36; --ink:#E4ECEF; --muted:#93A6AE; --line:#2D4250;
+  --mat:#7FB3C6; --amber:#F2B632; --fault:#FF7A6E; --ok:#6FCB94; --tag:#2B2716; --tagline:#5E5226;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 "Barlow",system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:860px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.brand{font:700 30px/1 "Barlow Condensed","Arial Narrow",sans-serif;letter-spacing:.5px;margin:0}
+.brand span{color:var(--mat)}
+.sub{color:var(--muted);font-size:14px;margin:4px 0 0}
+nav{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px}
+nav button{border:0;background:none;color:var(--muted);font:600 15px "Barlow",sans-serif;padding:8px 14px;border-radius:7px;cursor:pointer}
+nav button[aria-selected="true"]{background:var(--mat);color:var(--bg)}
+button:focus-visible,textarea:focus-visible,input:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+label{display:block;font-weight:600;font-size:14px;margin-bottom:6px}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+label.btn{display:inline-block;margin:0}
+textarea.drag{border:2px dashed var(--amber)}
+textarea{width:100%;min-height:190px;resize:vertical;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:12px;font:13px/1.45 "JetBrains Mono",ui-monospace,Menlo,monospace}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+input[type=text],input[type=search]{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:15px "Barlow",sans-serif}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--ink);font:600 15px "Barlow",sans-serif;padding:10px 16px;border-radius:8px;cursor:pointer}
+.btn.primary{background:var(--mat);border-color:var(--mat);color:var(--bg)}
+.hint{color:var(--muted);font-size:14px;margin:10px 0 0}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:18px 0 14px}
+.facts div{background:var(--panel);padding:10px 12px}
+.facts dt{font-size:13px;color:var(--muted)}
+.facts dd{margin:2px 0 0;font-weight:600;word-break:break-word}
+.tag{position:relative;background:var(--tag);border:1px solid var(--tagline);border-radius:6px 12px 12px 6px;padding:16px 16px 16px 30px;margin-bottom:12px}
+.tag::before{content:"";position:absolute;left:10px;top:12px;bottom:12px;border-left:2px dashed var(--tagline)}
+.tag .part{font:700 28px/1.1 "Barlow Condensed","Arial Narrow",sans-serif;margin:0 0 4px}
+.tag .why{margin:0 0 8px}
+.tag .next{margin:0;font-size:15px}
+.tag .next b{color:var(--mat)}
+.conf{display:inline-block;font-weight:700;font-size:13px;padding:2px 8px;border-radius:999px;margin-bottom:8px;border:1px solid currentColor}
+.conf.alta{color:var(--fault)} .conf.media{color:var(--amber)} .conf.baja{color:var(--muted)}
+.code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+.raw{margin-top:14px}
+.raw summary{cursor:pointer;font-weight:600;color:var(--muted)}
+.raw pre{overflow-x:auto;white-space:pre-wrap;word-break:break-word;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;font:12px/1.45 "JetBrains Mono",ui-monospace,monospace;max-height:280px}
+.empty{color:var(--muted);text-align:center;padding:28px 10px}
+.hist-item{display:flex;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer}
+.hist-item:last-child{border-bottom:0}
+.hist-item small{color:var(--muted);display:block}
+.table-wrap{overflow-x:auto;margin-top:12px}
+table{border-collapse:collapse;width:100%;min-width:560px;font-size:15px}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:13px;color:var(--muted);font-weight:600}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+.disclaimer{color:var(--muted);font-size:13px;margin-top:22px}
+[hidden]{display:none!important}
+@media (max-width:600px){.row{grid-template-columns:1fr}.facts{grid-template-columns:1fr}.brand{font-size:26px}}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 class="brand">Panic<span>Bench</span></h1>
+      <p class="sub">Lectura de panic-full para el banco de reparación</p>
+    </div>
+    <nav role="tablist">
+      <button role="tab" aria-selected="true" data-tab="analizar">Analizar</button>
+      <button role="tab" aria-selected="false" data-tab="historial">Historial</button>
+      <button role="tab" aria-selected="false" data-tab="codigos">Códigos</button>
+    </nav>
+  </header>
+
+  <section id="tab-analizar">
+    <div class="panel">
+      <label for="log">Panic log</label>
+      <textarea id="log" spellcheck="false" placeholder="Pega aquí el contenido del panic-full, sube el archivo .ips o arrástralo encima"></textarea>
+      <div class="row">
+        <div><label for="orden">Orden de trabajo</label><input type="text" id="orden" placeholder="Ej. OT-1042"></div>
+        <div><label for="cliente">Cliente</label><input type="text" id="cliente" placeholder="Nombre del cliente"></div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="btnAnalizar">Analizar log</button>
+        <label class="btn" for="archivo" tabindex="0" id="lblArchivo">Subir archivo .ips</label><input type="file" class="vh" id="archivo">
+        <button class="btn" id="btnEjemplo">Cargar ejemplo</button>
+        <button class="btn" id="btnLimpiar">Limpiar</button>
+      </div>
+      <p class="hint">En el iPhone: Ajustes › Privacidad y seguridad › Análisis y mejoras › Datos de análisis › archivo que empieza por <span class="code">panic-full</span>.</p>
+    </div>
+    <div id="resultado"></div>
+  </section>
+
+  <section id="tab-historial" hidden>
+    <div class="panel">
+      <div id="histList"></div>
+      <div class="actions"><button class="btn" id="btnBorrarHist">Borrar historial</button></div>
+      <p class="hint">El historial se guarda solo en este navegador.</p>
+    </div>
+  </section>
+
+  <section id="tab-codigos" hidden>
+    <div class="panel">
+      <label for="filtro">Buscar código o pieza</label>
+      <input type="search" id="filtro" placeholder="Ej. mic1, TG0B, batería, AOP">
+      <div class="table-wrap"><table><thead><tr><th>Código</th><th>Pieza probable</th><th>Confianza</th><th>Nota</th></tr></thead><tbody id="tablaCodigos"></tbody></table></div>
+    </div>
+  </section>
+
+  <p class="disclaimer">Orientación basada en patrones conocidos del sector. El significado de un código puede cambiar según modelo y versión de iOS: confirma siempre con prueba de piezas antes de cotizar.</p>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+const MODELOS={"iPhone10,1":"iPhone 8","iPhone10,4":"iPhone 8","iPhone10,2":"iPhone 8 Plus","iPhone10,5":"iPhone 8 Plus","iPhone10,3":"iPhone X","iPhone10,6":"iPhone X","iPhone11,2":"iPhone XS","iPhone11,4":"iPhone XS Max","iPhone11,6":"iPhone XS Max","iPhone11,8":"iPhone XR","iPhone12,1":"iPhone 11","iPhone12,3":"iPhone 11 Pro","iPhone12,5":"iPhone 11 Pro Max","iPhone12,8":"iPhone SE (2.ª gen)","iPhone13,1":"iPhone 12 mini","iPhone13,2":"iPhone 12","iPhone13,3":"iPhone 12 Pro","iPhone13,4":"iPhone 12 Pro Max","iPhone14,4":"iPhone 13 mini","iPhone14,5":"iPhone 13","iPhone14,2":"iPhone 13 Pro","iPhone14,3":"iPhone 13 Pro Max","iPhone14,6":"iPhone SE (3.ª gen)","iPhone14,7":"iPhone 14","iPhone14,8":"iPhone 14 Plus","iPhone15,2":"iPhone 14 Pro","iPhone15,3":"iPhone 14 Pro Max","iPhone15,4":"iPhone 15","iPhone15,5":"iPhone 15 Plus","iPhone16,1":"iPhone 15 Pro","iPhone16,2":"iPhone 15 Pro Max","iPhone17,3":"iPhone 16","iPhone17,4":"iPhone 16 Plus","iPhone17,1":"iPhone 16 Pro","iPhone17,2":"iPhone 16 Pro Max","iPhone17,5":"iPhone 16e"};
+
+// Sensores reportados en "Missing sensor(s)"
+const SENSORES={
+  mic1:{part:"Flex del puerto de carga",conf:"alta",why:"El micrófono inferior (mic1) no responde. En iPhone 11 a 14 va montado en el flex de carga.",next:"Prueba con un flex de carga conocido bueno; revisa también el conector en placa."},
+  mic2:{part:"Flex de encendido / volumen",conf:"media",why:"El micrófono superior o trasero (mic2) no responde. En varios modelos está en el flex de botones.",next:"Prueba flex de encendido/volumen; si persiste, revisa el conector en placa."},
+  mic3:{part:"Flex del micrófono frontal / auricular",conf:"baja",why:"Un tercer micrófono no responde; su ubicación varía según el modelo.",next:"Consulta el esquemático del modelo y prueba el flex superior."},
+  prs0:{part:"Barómetro (flex del puerto de carga)",conf:"alta",why:"El sensor de presión no responde. En iPhone 11 a 14 suele ir en el flex de carga.",next:"Cambia el flex de carga y vuelve a comprobar si reinicia cada 3 minutos."},
+  tg0b:{part:"Batería",conf:"alta",why:"Falta el sensor de temperatura de la batería (TG0B).",next:"Prueba con una batería buena. Si sigue igual, revisa el conector de batería en placa."},
+  tg0v:{part:"Batería",conf:"alta",why:"Falta la lectura de voltaje de la batería (TG0V).",next:"Prueba con una batería buena; revisa pines del conector y el flex de batería si lo tiene."},
+  tg0c:{part:"Batería / conector",conf:"media",why:"Sensor de batería sin respuesta.",next:"Prueba batería buena y revisa el conector."}
+};
+
+// Reglas sobre el texto del panic
+const REGLAS=[
+  {re:/thermalmonitord/i,code:"thermalmonitord",part:"Sensor faltante",conf:"media",why:"El sistema no recibió respuesta del monitor térmico y reinició (típico reinicio cada ~3 min).",next:"Mira la lista de sensores faltantes; señala la pieza concreta."},
+  {re:/SMC PANIC|AppleSMC/i,code:"SMC PANIC",part:"Gestión de energía / sensores",conf:"media",why:"Fallo en el controlador de gestión del sistema, normalmente por un sensor o línea de alimentación.",next:"Prueba batería y flex de carga; desconecta periféricos uno a uno."},
+  {re:/AOP PANIC|AppleSPU|\baop\b/i,code:"AOP / SPU",part:"Flex de sensores (Face ID / proximidad)",conf:"media",why:"Falla el procesador siempre activo, que gestiona sensores como proximidad, luz ambiental o acelerómetro.",next:"Desconecta el flex frontal de sensores y prueba; luego flex de carga."},
+  {re:/SEP Panic|\bSEP\b|AppleSEP/i,code:"SEP",part:"Secure Enclave (Face ID / Touch ID o placa)",conf:"baja",why:"Error del enclave seguro. Puede venir de Face ID/Touch ID dañados, de software o de la placa.",next:"Restaura en DFU. Si persiste, prueba sin el módulo biométrico conectado."},
+  {re:/AppleANS|ANS2|NVMe|\bnand\b/i,code:"ANS2 / NVMe",part:"Almacenamiento NAND (placa)",conf:"media",why:"El controlador de almacenamiento falló o no responde.",next:"Restaura en DFU. Si da error 4013/4014 o similar, diagnóstico de placa."},
+  {re:/wifid|AppleBCMWLAN|bluetoothd/i,code:"wifid / BCMWLAN",part:"Módulo Wi-Fi / Bluetooth (placa)",conf:"media",why:"El servicio Wi-Fi no respondió a tiempo.",next:"Comprueba si el Wi-Fi aparece en gris. Restaura; si persiste, reparación de placa."},
+  {re:/baseband|CommCenter|BBTimeout|AppleBaseband/i,code:"Baseband",part:"Módem / baseband (placa)",conf:"media",why:"El chip de comunicaciones no respondió.",next:"Revisa si muestra Sin servicio o IMEI vacío. Prueba con otra SIM y restaura."},
+  {re:/AppleARMI2C|i2c\d|\bi2c\b/i,code:"I2C",part:"Periférico en el bus I2C",conf:"media",why:"Un componente en el bus de comunicación (batería, cámara, carga, sensores) bloquea la línea.",next:"Desconecta periféricos uno a uno hasta que el panic desaparezca."},
+  {re:/Tristar|Hydra|AppleSynopsysOTG|lightning/i,code:"Tristar / Hydra",part:"Circuito de carga USB / Lightning",conf:"media",why:"Error en el controlador de carga.",next:"Prueba flex de carga; si persiste, IC de carga en placa."},
+  {re:/AppleSmartBattery|SmartBatteryManager|gas ?gauge/i,code:"SmartBattery",part:"Batería",conf:"media",why:"Error al comunicarse con la batería.",next:"Prueba con una batería buena."},
+  {re:/AppleH\d+CamIn|\bisp\b|camera/i,code:"Cámara / ISP",part:"Módulo de cámara",conf:"media",why:"Falla en el procesador de imagen o en una cámara.",next:"Desconecta cámaras traseras y frontal y prueba de nuevo."},
+  {re:/AppleCLCD|AppleM2CLCD|\bDCP\b|display/i,code:"DCP / CLCD",part:"Pantalla",conf:"baja",why:"Error en la controladora de pantalla.",next:"Prueba con una pantalla buena; revisa el conector."},
+  {re:/kernel data abort|instruction fetch abort|Unexpected fault/i,code:"Kernel abort",part:"Software o placa (CPU / RAM)",conf:"baja",why:"Fallo genérico del kernel; no señala una pieza concreta.",next:"Restaura en DFU. Si se repite con iOS limpio, diagnóstico de placa."},
+  {re:/watchdog timeout/i,code:"watchdog timeout",part:"Proceso bloqueado",conf:"baja",why:"Un servicio del sistema dejó de responder. Indica la pieza según el servicio nombrado.",next:"Busca qué proceso aparece tras \"checkins from\"."}
+];
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let ultimo=null;
+
+function parsear(txt){
+  const g=re=>{const m=txt.match(re);return m?m[1]:""};
+  const product=g(/"product"\s*:\s*"([^"]+)"/)||g(/(iPhone\d+,\d+)/);
+  const build=g(/"build"\s*:\s*"([^"]+)"/)||g(/"os_version"\s*:\s*"([^"]+)"/);
+  const date=g(/"date"\s*:\s*"([^"]+)"/)||g(/"timestamp"\s*:\s*"([^"]+)"/);
+  let panic="";
+  const pm=txt.match(/"panicString"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if(pm){try{panic=JSON.parse('"'+pm[1]+'"')}catch(e){panic=pm[1].replace(/\\n/g,"\n")}}
+  if(!panic)panic=txt.replace(/\\n/g,"\n");
+  const primera=(panic.split("\n").find(l=>l.trim())||"").trim().slice(0,300);
+  const ms=panic.match(/Missing sensor\(s\):\s*([^\n]+)/i);
+  const sensores=ms?ms[1].split(/[\s,]+/).filter(Boolean):[];
+  const hall=[];
+  sensores.forEach(s=>{
+    const d=SENSORES[s.toLowerCase()];
+    hall.push(d?{code:s,...d}:{code:s,part:"Sensor no catalogado",conf:"baja",why:"Este sensor no está en la base de datos.",next:"Busca \""+s+" missing sensor\" junto con el modelo."});
+  });
+  REGLAS.forEach(r=>{
+    if(r.re.test(panic)){
+      if(r.code==="thermalmonitord"&&sensores.length)return;
+      if(r.code==="watchdog timeout"&&hall.length)return;
+      hall.push(r);
+    }
+  });
+  const orden={alta:0,media:1,baja:2};
+  hall.sort((a,b)=>orden[a.conf]-orden[b.conf]);
+  return{product,modelo:MODELOS[product]||product||"No detectado",build:build||"No detectada",date:date||"No detectada",primera,sensores,hall,panic};
+}
+
+function render(r){
+  const out=$("#resultado");
+  if(!r){out.innerHTML="";return}
+  let h=`<dl class="facts"><div><dt>Modelo</dt><dd>${esc(r.modelo)}${r.product&&MODELOS[r.product]?` <span class="code">${esc(r.product)}</span>`:""}</dd></div><div><dt>iOS</dt><dd>${esc(r.build)}</dd></div><div><dt>Fecha del panic</dt><dd>${esc(r.date)}</dd></div></dl>`;
+  if(r.hall.length){
+    r.hall.forEach(x=>{
+      h+=`<article class="tag"><span class="conf ${x.conf}">Confianza ${x.conf}</span><p class="part">${esc(x.part)}</p><p class="why">${esc(x.why)} <span class="code">${esc(x.code)}</span></p><p class="next"><b>Siguiente paso:</b> ${esc(x.next)}</p></article>`;
+    });
+  }else{
+    h+=`<div class="panel empty">No se reconoció ningún patrón conocido. Revisa la primera línea del panic abajo y búscala junto con el modelo.</div>`;
+  }
+  h+=`<div class="actions"><button class="btn primary" id="btnCopiar">Copiar informe</button></div>`;
+  h+=`<details class="raw"><summary>Primera línea del panic</summary><pre>${esc(r.primera||"(vacía)")}</pre></details>`;
+  out.innerHTML=h;
+  $("#btnCopiar").onclick=()=>copiar(informe(r));
+}
+
+function informe(r){
+  const o=$("#orden").value.trim(),c=$("#cliente").value.trim();
+  let t=`INFORME DE DIAGNÓSTICO — PanicBench\n`;
+  if(o)t+=`Orden: ${o}\n`;if(c)t+=`Cliente: ${c}\n`;
+  t+=`Equipo: ${r.modelo}${r.product?" ("+r.product+")":""}\niOS: ${r.build}\nFecha panic: ${r.date}\n\n`;
+  if(r.hall.length)r.hall.forEach((x,i)=>{t+=`${i+1}. ${x.part} [${x.code}] — confianza ${x.conf}\n   ${x.why}\n   Siguiente paso: ${x.next}\n`});
+  else t+="Sin patrón reconocido.\n";
+  t+=`\nPanic: ${r.primera}\n\nDiagnóstico orientativo; requiere confirmación con prueba de piezas.`;
+  return t;
+}
+
+function copiar(t){
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(()=>toast("Informe copiado"),()=>fallback(t))}else fallback(t);
+}
+function fallback(t){const a=document.createElement("textarea");a.value=t;document.body.appendChild(a);a.select();try{document.execCommand("copy");toast("Informe copiado")}catch(e){toast("No se pudo copiar")}a.remove()}
+function toast(m){const e=$("#toast");e.textContent=m;e.classList.add("show");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("show"),1800)}
+
+// Historial
+const KEY="panicbench-historial";
+function leerHist(){try{return JSON.parse(localStorage.getItem(KEY))||[]}catch(e){return[]}}
+function guardarHist(arr){try{localStorage.setItem(KEY,JSON.stringify(arr.slice(0,50)))}catch(e){}}
+function renderHist(){
+  const arr=leerHist(),el=$("#histList");
+  if(!arr.length){el.innerHTML=`<p class="empty">Aún no hay análisis guardados. Analiza un log y aparecerá aquí.</p>`;return}
+  el.innerHTML=arr.map((x,i)=>`<div class="hist-item" data-i="${i}" tabindex="0"><div><strong>${esc(x.orden||"Sin orden")} — ${esc(x.modelo)}</strong><small>${esc(x.cliente||"")}${x.cliente?" · ":""}${esc(x.pieza)}</small></div><small>${esc(x.cuando)}</small></div>`).join("");
+  el.querySelectorAll(".hist-item").forEach(n=>{
+    const abrir=()=>{const x=leerHist()[n.dataset.i];$("#log").value=x.log;$("#orden").value=x.orden||"";$("#cliente").value=x.cliente||"";tab("analizar");analizar(false)};
+    n.onclick=abrir;n.onkeydown=e=>{if(e.key==="Enter")abrir()};
+  });
+}
+
+function analizar(guardar=true){
+  const txt=$("#log").value.trim();
+  if(!txt){toast("Pega primero un panic log");return}
+  const r=parsear(txt);ultimo=r;render(r);
+  if(guardar){
+    const arr=leerHist();
+    arr.unshift({orden:$("#orden").value.trim(),cliente:$("#cliente").value.trim(),modelo:r.modelo,pieza:r.hall[0]?r.hall[0].part:"Sin patrón",cuando:new Date().toLocaleString("es"),log:txt.slice(0,200000)});
+    guardarHist(arr);
+  }
+  $("#resultado").scrollIntoView({behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth",block:"start"});
+}
+
+// Tabla de códigos
+function renderTabla(f=""){
+  const filas=[...Object.entries(SENSORES).map(([k,v])=>({code:k.toUpperCase().startsWith("TG")?k.toUpperCase():k,...v})),...REGLAS];
+  const q=f.toLowerCase();
+  $("#tablaCodigos").innerHTML=filas.filter(x=>!q||(x.code+x.part+x.why).toLowerCase().includes(q)).map(x=>`<tr><td><span class="code">${esc(x.code)}</span></td><td>${esc(x.part)}</td><td><span class="conf ${x.conf}">${x.conf}</span></td><td>${esc(x.why)}</td></tr>`).join("")||`<tr><td colspan="4" class="empty">Sin resultados para esa búsqueda.</td></tr>`;
+}
+
+function tab(n){
+  document.querySelectorAll("nav button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===n));
+  ["analizar","historial","codigos"].forEach(t=>$("#tab-"+t).hidden=t!==n);
+  if(n==="historial")renderHist();
+}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>tab(b.dataset.tab));
+
+const EJEMPLO=`{"bug_type":"210","timestamp":"2026-10-12 09:14:22.00 -0500","os_version":"iPhone OS 17.6.1 (21G93)","incident_id":"A1B2C3D4"}
+{"build":"iPhone OS 17.6.1 (21G93)","product":"iPhone12,1","kernel":"Darwin Kernel Version 23.6.0","date":"2026-10-12 09:14:22.48 -0500","panicString":"panic(cpu 4 caller 0xfffffff02a8c1e34): userspace watchdog timeout: no successful checkins from thermalmonitord in 180 seconds\\nservice: thermalmonitord, total successful checkins in 180 seconds: 0\\nMissing sensor(s): mic1 prs0 \\nDebugger message: panic"}`;
+
+function cargarArchivo(f){
+  if(!f)return;
+  if(f.size>15e6){toast("El archivo es demasiado grande");return}
+  const rd=new FileReader();
+  rd.onload=()=>{$("#log").value=rd.result;toast("Archivo cargado: "+f.name);analizar(true)};
+  rd.onerror=()=>toast("No se pudo leer el archivo");
+  rd.readAsText(f);
+}
+$("#archivo").onchange=e=>{cargarArchivo(e.target.files[0]);e.target.value=""};
+$("#lblArchivo").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();$("#archivo").click()}};
+const ta=$("#log");
+ta.addEventListener("dragover",e=>{e.preventDefault();ta.classList.add("drag")});
+ta.addEventListener("dragleave",()=>ta.classList.remove("drag"));
+ta.addEventListener("drop",e=>{e.preventDefault();ta.classList.remove("drag");const f=e.dataTransfer&&e.dataTransfer.files[0];if(f)cargarArchivo(f)});
+$("#btnAnalizar").onclick=()=>analizar(true);
+$("#btnEjemplo").onclick=()=>{$("#log").value=EJEMPLO;$("#orden").value="OT-DEMO";analizar(false)};
+$("#btnLimpiar").onclick=()=>{$("#log").value="";$("#orden").value="";$("#cliente").value="";render(null)};
+$("#btnBorrarHist").onclick=()=>{guardarHist([]);renderHist();toast("Historial borrado")};
+$("#filtro").oninput=e=>renderTabla(e.target.value);
+renderTabla();
+</script>
+</body>
+</html>
